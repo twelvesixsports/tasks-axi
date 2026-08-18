@@ -36,6 +36,8 @@ import {
 } from "../public-followup.js";
 import type {
   Capabilities,
+  CreateOptions,
+  LocatedTask,
   PruneOptions,
   PruneResult,
   Store,
@@ -354,6 +356,14 @@ export class MarkdownStore implements Store {
     return parseBacklog(this.loadSource() ?? "");
   }
 
+  private loadArchiveSource(): string | undefined {
+    return readFileSafe(this.archivePath);
+  }
+
+  private loadArchive(): BacklogDoc {
+    return parseBacklog(this.loadArchiveSource() ?? "");
+  }
+
   private loadForUpdate(): LoadedBacklogDoc {
     const source = this.loadSource();
     return { doc: parseBacklog(source ?? ""), source };
@@ -419,6 +429,25 @@ export class MarkdownStore implements Store {
   async get(id: string): Promise<Task | null> {
     const found = this.findEntry(this.load(), id);
     return found ? found.entry.task : null;
+  }
+
+  async getIncludingArchive(id: string): Promise<LocatedTask | null> {
+    const matches: LocatedTask[] = [
+      ...this.allTasks(this.load())
+        .filter((task) => task.id === id)
+        .map((task) => ({ task, location: "active" as const })),
+      ...this.allTasks(this.loadArchive())
+        .filter((task) => task.id === id)
+        .map((task) => ({ task, location: "archive" as const })),
+    ];
+    if (matches.length > 1) {
+      throw new AxiError(
+        `Task "${id}" is ambiguous: found ${matches.length} records across the active backlog and archive`,
+        "CONFLICT",
+        ["Remove or rename duplicate records before retrying"],
+      );
+    }
+    return matches[0] ?? null;
   }
 
   async list(query: TaskQuery): Promise<{ items: Task[]; total: number }> {
@@ -589,7 +618,7 @@ export class MarkdownStore implements Store {
   // CRUD
   // -------------------------------------------------------------------------
 
-  async create(input: TaskInput): Promise<Task> {
+  async create(input: TaskInput, options: CreateOptions = {}): Promise<Task> {
     return withLock(this.path, () => {
       if (input.kind === PUBLIC_FOLLOWUP_KIND) {
         const value = input.public_followup
@@ -614,9 +643,23 @@ export class MarkdownStore implements Store {
       }
       const loaded = this.loadForUpdate();
       const { doc } = loaded;
+      const archiveSource = options.refuseIfPresentAnywhere
+        ? this.loadArchiveSource()
+        : undefined;
+      const archiveDoc = options.refuseIfPresentAnywhere
+        ? parseBacklog(archiveSource ?? "")
+        : undefined;
       this.ensureSections(doc);
-      if (this.findEntry(doc, input.id)) {
-        throw new AxiError(`Task "${input.id}" already exists`, "CONFLICT");
+      const activeMatch = this.findEntry(doc, input.id);
+      const archivedMatch = archiveDoc
+        ? this.findEntry(archiveDoc, input.id)
+        : null;
+      if (activeMatch || archivedMatch) {
+        const location = activeMatch ? "active backlog" : "archive";
+        throw new AxiError(
+          `Task "${input.id}" already exists in the ${location}`,
+          "CONFLICT",
+        );
       }
       const task = this.taskFromInput(input);
       this.requireExistingDeps(doc, task.deps);
@@ -627,6 +670,16 @@ export class MarkdownStore implements Store {
         entry,
         task.state === "in_flight",
       );
+      if (
+        options.refuseIfPresentAnywhere &&
+        this.loadArchiveSource() !== archiveSource
+      ) {
+        throw new AxiError(
+          "Archive changed on disk; retry the command",
+          "CONFLICT",
+          ["Review the latest archive, then re-run the command"],
+        );
+      }
       this.persist(loaded);
       return task;
     });

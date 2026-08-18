@@ -1,6 +1,7 @@
 import { truncate } from "./body.js";
 import { activeBlockers, isHoldActive } from "./derive.js";
 import type { Task } from "./model.js";
+import type { TaskLocation } from "./store.js";
 import { field, renderDetail, renderList, type FieldDef } from "./toon.js";
 
 /**
@@ -129,7 +130,15 @@ export function renderTaskDetail(
   all: Task[],
   full: boolean,
   truncationHint?: string,
+  location?: TaskLocation,
 ): string {
-  const row = toRow(task, { all, full, truncationHint });
-  return renderDetail("task", row, DETAIL_SCHEMA);
+  const row = {
+    ...toRow(task, { all, full, truncationHint }),
+    ...(location ? { location } : {}),
+  };
+  return renderDetail(
+    "task",
+    row,
+    location ? [...DETAIL_SCHEMA, field("location")] : DETAIL_SCHEMA,
+  );
 }

@@ -9,7 +9,7 @@ The CLI layer never knows which backend is active — it only talks to the `Stor
 
 - `src/cli.ts` — `runAxiCli` wiring: `DESCRIPTION`, `TOP_HELP`, the verb→handler map (with aliases create/view/edit/delete/close), the optional `task` noun prefix, and the global `--backend` / `--file` flags (stripped before handlers, parsed for `resolveContext`).
 - `src/context.ts` — `resolveTasksContext` builds the backend `Store` + `ResolvedConfig`; every command receives this `TasksContext`.
-- `src/store.ts` - the `Store` interface and `Capabilities`. Core contract: `create/get/update/remove/list/transition/addDep/removeDep/updatePublicFollowup`. `prune`/`render` are optional and capability-gated.
+- `src/store.ts` - the `Store` interface and `Capabilities`. Core contract: `create/get/getIncludingArchive/update/remove/list/transition/addDep/removeDep/updatePublicFollowup`; markdown `create(..., { refuseIfPresentAnywhere: true })` owns the atomic active-plus-archive uniqueness check. `prune`/`render` are optional and capability-gated.
 - `src/model.ts` — the `Task` data model (report §5).
 - `src/pr-url.ts` — `isPrUrl`, the one canonical PR-URL seam (GitHub `/pull/<n>` on github.com, Forgejo `/pulls/<n>` on any lowercase DNS host) shared by prose link derivation, `--pr` validation, and public-followup `pr_url`; near-misses derive as `doc` links, never `pr`.
 - `src/derive.ts` - worker `blocked` / `ready` / active `held` and public delivery readiness are derived in the CLI from `list` + the dep graph + hold date gates, never Store methods, so every backend gets them for free.
@@ -43,7 +43,7 @@ The CLI layer never knows which backend is active — it only talks to the `Stor
 ## Conventions
 
 - **Ids are caller-supplied join keys (D6)** validated by `ID_RE` (slug-shaped); `add --mint [--prefix]` generates a `slug-xx` id.
-- **prune archives, never deletes (D4)** - surplus Done tasks are appended to `markdown.archive` or default `done-archive.md`. It keeps N _recognized_ tasks; free-form Done lines are preserved and not counted.
+- **prune archives, never deletes (D4)** - surplus Done tasks are appended to `markdown.archive` or default `done-archive.md`. Dated `## Archived YYYY-MM-DD` blocks use the same parser and task grammar as active Done records so archive-aware lookup can return structured tasks. It keeps N _recognized_ tasks; free-form Done lines are preserved and not counted.
 - **`done` auto-prunes** to `config.doneKeep` (default 10) and archives, unless `--no-prune`.
 - **`done` on an already-Done task** stays idempotent but backfills supplied `--pr`, `--report`, and non-duplicate `--note` metadata without replacing the original closed date.
 - **Dependency mutations validate targets.** `add --blocked-by` and `block --by` reject missing blockers and self-blocks. Parsed dangling blockers are still treated as resolved for legacy hand-edited files.

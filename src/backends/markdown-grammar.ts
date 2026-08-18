@@ -383,7 +383,7 @@ function sectionState(headerLine: string): State | undefined {
   const text = m[1].toLowerCase();
   if (text === "in flight") return "in_flight";
   if (text === "queued") return "queued";
-  if (text.startsWith("done")) return "done";
+  if (text.startsWith("done") || text.startsWith("archived ")) return "done";
   return undefined;
 }
 

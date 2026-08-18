@@ -81,6 +81,149 @@ describe("CLI entrypoint", () => {
     const c = capture();
     await main({ argv: ["view", "cert-cleanup"], stdout: c.stdout });
     expect(c.read()).toContain("id: cert-cleanup");
+    expect(c.read()).not.toContain("location:");
+  });
+
+  it("finds an active record with --include-archive and reports its location", async () => {
+    const c = capture();
+    await main({
+      argv: ["show", "cert-cleanup", "--include-archive"],
+      stdout: c.stdout,
+    });
+    expect(c.read()).toContain("id: cert-cleanup");
+    expect(c.read()).toContain("location: active");
+  });
+
+  it("finds an archived record with --include-archive and reports its location", async () => {
+    process.chdir(dir);
+    writeFileSync(
+      join(dir, ".tasks.toml"),
+      '[markdown]\narchive = "completed.md"\n',
+    );
+    writeFileSync(
+      join(dir, "completed.md"),
+      "\n## Archived 2026-07-01\n- [x] shipped-q1 - shipped work (repo: demo) (done 2026-06-30)\n  archived detail\n",
+    );
+    const c = capture();
+    await main({
+      argv: ["show", "shipped-q1", "--include-archive", "--full"],
+      stdout: c.stdout,
+    });
+    expect(c.read()).toContain("id: shipped-q1");
+    expect(c.read()).toContain("repo: demo");
+    expect(c.read()).toContain("body: archived detail");
+    expect(c.read()).toContain("location: archive");
+  });
+
+  it("reports a missing record after searching the active backlog and archive", async () => {
+    const c = capture();
+    await main({
+      argv: ["show", "missing-q1", "--include-archive"],
+      stdout: c.stdout,
+    });
+    expect(decode(c.read())).toMatchObject({
+      error: 'Task "missing-q1" not found in this backlog',
+      code: "NOT_FOUND",
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("refuses an ambiguous archived lookup", async () => {
+    writeFileSync(
+      join(dir, "done-archive.md"),
+      "\n## Archived 2026-07-01\n- [x] duplicate-q1 - first copy\n\n## Archived 2026-07-02\n- [x] duplicate-q1 - second copy\n",
+    );
+    const c = capture();
+    await main({
+      argv: ["show", "duplicate-q1", "--include-archive"],
+      stdout: c.stdout,
+    });
+    expect(decode(c.read())).toMatchObject({
+      error:
+        'Task "duplicate-q1" is ambiguous: found 2 records across the active backlog and archive',
+      code: "CONFLICT",
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("keeps archived records hidden when --include-archive is absent", async () => {
+    writeFileSync(
+      join(dir, "done-archive.md"),
+      "\n## Archived 2026-07-01\n- [x] archived-only-q1 - old work\n",
+    );
+    const c = capture();
+    await main({ argv: ["show", "archived-only-q1"], stdout: c.stdout });
+    expect(decode(c.read())).toMatchObject({ code: "NOT_FOUND" });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("atomically adds an id absent from the backlog and archive", async () => {
+    const c = capture();
+    await main({
+      argv: [
+        "add",
+        "fresh-anywhere-q1",
+        "fresh task",
+        "--refuse-if-present-anywhere",
+      ],
+      stdout: c.stdout,
+    });
+    expect(c.read()).toContain("ok: added fresh-anywhere-q1 -> Queued");
+    expect(readFileSync(path, "utf8")).toContain("fresh-anywhere-q1");
+  });
+
+  it("refuses to add an id that already exists in the Done archive", async () => {
+    writeFileSync(
+      join(dir, "done-archive.md"),
+      "\n## Archived 2026-07-01\n- [x] shipped-q1 - original record\n",
+    );
+    const before = readFileSync(path, "utf8");
+    const c = capture();
+    await main({
+      argv: [
+        "add",
+        "shipped-q1",
+        "replacement",
+        "--refuse-if-present-anywhere",
+      ],
+      stdout: c.stdout,
+    });
+    expect(decode(c.read())).toMatchObject({
+      error: 'Task "shipped-q1" already exists in the archive',
+      code: "CONFLICT",
+    });
+    expect(process.exitCode).toBe(1);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("refuses to add an active id with --refuse-if-present-anywhere", async () => {
+    const before = readFileSync(path, "utf8");
+    const c = capture();
+    await main({
+      argv: [
+        "add",
+        "cert-cleanup",
+        "replacement",
+        "--refuse-if-present-anywhere",
+      ],
+      stdout: c.stdout,
+    });
+    expect(decode(c.read())).toMatchObject({
+      error: 'Task "cert-cleanup" already exists in the active backlog',
+      code: "CONFLICT",
+    });
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("keeps add archive-unaware when the refusal flag is absent", async () => {
+    writeFileSync(
+      join(dir, "done-archive.md"),
+      "\n## Archived 2026-07-01\n- [x] reused-q1 - old record\n",
+    );
+    const c = capture();
+    await main({ argv: ["add", "reused-q1", "new record"], stdout: c.stdout });
+    expect(c.read()).toContain("ok: added reused-q1 -> Queued");
+    expect(readFileSync(path, "utf8")).toContain("reused-q1 - new record");
   });
 
   it("reports malformed task ids as validation errors", async () => {
