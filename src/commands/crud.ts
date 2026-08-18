@@ -50,6 +50,7 @@ flags:
   --start (place in In flight) | --queue (place in Queued, default)
   --blocked-by <id> (repeatable, must exist), --pr <url>, --report <path>, --priority <0-4>
   --mint [--prefix <p>]   mint a slug-xx id from the title instead of passing one
+  --refuse-if-present-anywhere   atomically refuse ids in the backlog or Done archive
   --json   print the resulting task as a JSON object
 examples:
   tasks-axi add lavish-foo-q9 "fix summary toggle" --kind ship --repo lavish-axi --start
@@ -67,11 +68,14 @@ examples:
   tasks-axi list --repo no-mistakes --fields blocked_by,created
   tasks-axi list --blocked`;
 
-export const SHOW_HELP = `usage: tasks-axi show <id> [--full]
+export const SHOW_HELP = `usage: tasks-axi show <id> [--full] [--include-archive]
 aliases: view
+flags:
+  --include-archive   search the active backlog and configured Done archive
 examples:
   tasks-axi show homemux-h7
-  tasks-axi show homemux-h7 --full`;
+  tasks-axi show homemux-h7 --full
+  tasks-axi show shipped-q1 --include-archive`;
 
 export const UPDATE_HELP = `usage: tasks-axi update <id> [flags]
 aliases: edit
@@ -242,6 +246,10 @@ export async function addCommand(
   const start = takeBoolFlag(args, "--start");
   const queue = takeBoolFlag(args, "--queue");
   const mint = takeBoolFlag(args, "--mint");
+  const refuseIfPresentAnywhere = takeBoolFlag(
+    args,
+    "--refuse-if-present-anywhere",
+  );
   const rawPrefix = takeFlag(args, "--prefix");
   const titleFlag = takeFlag(args, "--title");
 
@@ -290,7 +298,7 @@ export async function addCommand(
   await requireExistingBlockers(store, deps);
   const links = parseLinks(pr, report);
 
-  if (!mint) {
+  if (!mint && !refuseIfPresentAnywhere) {
     const existing = await store.get(id);
     if (existing) {
       const all = (await store.list({})).items;
@@ -336,7 +344,9 @@ export async function addCommand(
   if (body !== undefined) input.body = body;
   if (priority !== undefined) input.priority = priority;
 
-  const task = await store.create(input);
+  const task = await store.create(input, {
+    refuseIfPresentAnywhere,
+  });
   const all = (await store.list({})).items;
   return renderMutation({
     json,
@@ -463,16 +473,22 @@ export async function showCommand(
   const { store } = requireCtx(context);
   const args = [...rawArgs];
   const full = takeBoolFlag(args, "--full");
+  const includeArchive = takeBoolFlag(args, "--include-archive");
   const positionals = requirePositionals(args, 1, 1, SHOW_HELP.split("\n")[0]);
   const id = requireId(positionals[0], "id");
 
-  const task = await store.get(id);
+  const located = includeArchive
+    ? await store.getIncludingArchive(id)
+    : undefined;
+  const task = includeArchive ? (located?.task ?? null) : await store.get(id);
   if (!task) throw notFound(id, { globals: context?.suggestionGlobals });
 
   const all = (await store.list({})).items;
   const isBlocked = blockedIds(all).has(id);
 
-  const blocks = [renderTaskDetail(task, all, full)];
+  const blocks = [
+    renderTaskDetail(task, all, full, undefined, located?.location),
+  ];
   const help =
     task.kind === "public-followup"
       ? []

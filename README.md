@@ -111,6 +111,10 @@ tasks-axi update nm-release-validation --title "clearer title"
 
 # read the full notes on demand (truncated by default)
 tasks-axi show homemux-h7 --full
+# inspect the active backlog plus its configured Done archive
+tasks-axi show shipped-q1 --include-archive --full
+# atomically refuse an id already present in either location
+tasks-axi add unique-q1 "new work" --refuse-if-present-anywhere
 
 # maintenance
 tasks-axi prune --keep 10        # archives the surplus, never deletes
@@ -122,6 +126,7 @@ tasks-axi mv blocker-b1 dependent-d2 --to ../homemux/data/backlog.md
 
 Output is [TOON](https://toonformat.dev)-encoded and token-efficient.
 The long task body is truncated by default — the whole point is that `list` stays cheap; use `--full` only when you need the complete notes.
+`show --include-archive` returns the normal structured task fields plus `location: active|archive`, and refuses ambiguous duplicate records. `add --refuse-if-present-anywhere` checks the active backlog and configured Done archive under the backlog lock before creating.
 `update --body` and `update --body-file` replace the body wholesale, so agents should inspect the current body first and write back the curated current state rather than appending a journal entry.
 `--archive-body` preserves the replaced body in `note-archive.md` using the same dated markdown archive block style as done pruning.
 Every write leads with a terse `ok:` line confirming the write result, including the resulting task state when the command changes one (e.g. `ok: start lavish-share -> In flight`, `ok: done grok-harness-g7 -> Done (pr <url>)`, `ok: render -> normalized 3`), followed by state-aware next-step hints that never suggest an action the command just performed.

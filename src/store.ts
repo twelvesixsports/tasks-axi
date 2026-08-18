@@ -42,6 +42,18 @@ export interface PruneResult {
   ids: string[];
 }
 
+export type TaskLocation = "active" | "archive";
+
+export interface LocatedTask {
+  task: Task;
+  location: TaskLocation;
+}
+
+export interface CreateOptions {
+  /** Refuse atomically when the id exists in the active store or its archive. */
+  refuseIfPresentAnywhere?: boolean;
+}
+
 /**
  * The single narrow seam every backend implements (report §8). The CLI layer
  * (arg parsing, TOON rendering, suggestions, help) never knows which backend
@@ -57,8 +69,10 @@ export interface Store {
   capabilities(): Capabilities;
 
   // CRUD
-  create(input: TaskInput): Promise<Task>;
+  create(input: TaskInput, options?: CreateOptions): Promise<Task>;
   get(id: string): Promise<Task | null>;
+  /** Look up one unambiguous record in the active store and its archive. */
+  getIncludingArchive(id: string): Promise<LocatedTask | null>;
   /** Apply a patch and report which fields actually changed. */
   update(id: string, patch: TaskPatch): Promise<TaskUpdateResult>;
   remove(id: string): Promise<Task>;
